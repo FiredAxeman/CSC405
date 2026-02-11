@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Critical Thinking 2</title>
+    <style>
+        body { margin: 0; background-color: #333; display: flex; justify-content: center; align-items: center; height: 100vh; color: white; font-family: sans-serif; }
+        canvas { background-color: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        .controls { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <label>Recursion Depth (0-7): <span id="val">5</span></label>
+        <input type="range" id="depthSlider" min="0" max="7" value="5" step="1">
+    </div>
+    <canvas id="gl-canvas" width="512" height="512"></canvas>
+
+<script>
+    "use strict";
+
+    var canvas;
+    var gl;
+    var points = [];
+    var numTimesToSubdivide = 5;
+
+    window.onload = function init() {
+        canvas = document.getElementById("gl-canvas");
+        gl = canvas.getContext("webgl");
+
+        if (!gl) { alert("WebGL isn't available"); return; }
+
+        // Configure WebGL
+        gl.viewport(0, 0, canvas.width, canvas.height);
+        gl.clearColor(1.0, 1.0, 1.0, 1.0); // White background
+
+        // Load shaders and initialize attribute buffers
+        var program = initShaders(gl, "vertex-shader", "fragment-shader");
+        gl.useProgram(program);
+
+        // Slider interaction
+        document.getElementById("depthSlider").oninput = function(event) {
+            numTimesToSubdivide = parseInt(event.target.value);
+            document.getElementById("val").innerText = numTimesToSubdivide;
+            render();
+        };
+
+        render();
+    };
+
+    function triangle(a, b, c) {
+        points.push(a, b, c);
+    }
+
+    function divideTriangle(a, b, c, count) {
+        if (count === 0) {
+            triangle(a, b, c);
+        } else {
+            // Find midpoints of sides
+            var ab = mix(a, b, 0.5);
+            var ac = mix(a, c, 0.5);
+            var bc = mix(b, c, 0.5);
+
+            --count;
+
+            // Subdivide the three remaining outer triangles
+            // Exclude the middle triangle
+            divideTriangle(a, ab, ac, count);
+            divideTriangle(c, ac, bc, count);
+            divideTriangle(b, bc, ab, count);
+        }
+    }
+
+    function mix(u, v, s) {
+        var result = [];
+        for (var i = 0; i < u.length; ++i) {
+            result.push((1.0 - s) * u[i] + s * v[i]);
+        }
+        return result;
+    }
+
+    function render() {
+        // Reset points
+        points = [];
+
+        // Initial vertices of the triangle
+        var vertices = [
+            [-1, -1],
+            [0, 1],
+            [1, -1]
+        ];
+
+        // Generate the gasket points
+        divideTriangle(vertices[0], vertices[1], vertices[2], numTimesToSubdivide);
+
+        // Create buffer and load data
+        var bufferId = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufferId);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points.flat()), gl.STATIC_DRAW);
+
+        // Associate shader variables with data buffer
+        var program = gl.getParameter(gl.CURRENT_PROGRAM);
+        var vPosition = gl.getAttribLocation(program, "vPosition");
+        gl.vertexAttribPointer(vPosition, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(vPosition);
+
+        gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.drawArrays(gl.TRIANGLES, 0, points.length);
+    }
+
+    // --- Shader Helpers ---
+    function initShaders(gl, vertexId, fragmentId) {
+        var vertShdr = gl.createShader(gl.VERTEX_SHADER);
+        var fragShdr = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(vertShdr, document.getElementById(vertexId).text);
+        gl.shaderSource(fragShdr, document.getElementById(fragmentId).text);
+        gl.compileShader(vertShdr);
+        gl.compileShader(fragShdr);
+        
+        var program = gl.createProgram();
+        gl.attachShader(program, vertShdr);
+        gl.attachShader(program, fragShdr);
+        gl.linkProgram(program);
+        return program;
+    }
+</script>
+
+<script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec4 vPosition;
+    void main() {
+        gl_Position = vPosition;
+    }
+</script>
+
+<script id="fragment-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    void main() {
+        gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Red color
+    }
+</script>
+</body>
+</html>
