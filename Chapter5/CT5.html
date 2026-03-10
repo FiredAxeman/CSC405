@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebGL Interactive Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; }
+        canvas { border: 1px solid black; }
+        .controls { margin-top: 15px; }
+        button { padding: 5px 15px; margin: 0 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <h2>Interactive WebGL Viewer</h2>
+    <canvas id="gl-canvas" width="512" height="512">
+        Oops ... your browser doesn't support the HTML5 canvas element
+    </canvas>
+
+    <div class="controls">
+        <button id="Button1">Increase Theta</button>
+        <button id="Button2">Decrease Theta</button>
+        <button id="Button3">Increase Phi</button>
+        <button id="Button4">Decrease Phi</button>
+    </div>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec4 vPosition;
+        attribute vec4 vColor;
+        varying vec4 fColor;
+
+        uniform mat4 modelViewMatrix;
+        uniform mat4 projectionMatrix;
+
+        void main() {
+            gl_Position = projectionMatrix * modelViewMatrix * vPosition;
+            fColor = vColor;
+        }
+    </script>
+
+    <script id="fragment-shader" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec4 fColor;
+
+        void main() {
+            gl_FragColor = fColor;
+        }
+    </script>
+
+    <script>
+        let gl;
+        const numVertices  = 36;
+        let pointsArray = [];
+        let colorsArray = [];
+
+        // Camera and viewing parameters (Section 5.4.6 logic)
+        let radius = 4.0;
+        let theta  = 0.0;
+        let phi    = 0.0;
+        const dr = 5.0 * Math.PI/180.0; // 5 degrees in radians
+
+        let fovy = 45.0;  // Field-of-view in Y direction angle (in degrees)
+        let aspect = 1.0; // Viewport aspect ratio
+        let near = 0.1;
+        let far = 10.0;
+
+        let modelViewMatrix = mat4.create();
+        let projectionMatrix = mat4.create();
+        let modelViewMatrixLoc, projectionMatrixLoc;
+
+        // Cube coordinates
+        const vertices = [
+            vec4.fromValues(-0.5, -0.5,  0.5, 1.0),
+            vec4.fromValues(-0.5,  0.5,  0.5, 1.0),
+            vec4.fromValues( 0.5,  0.5,  0.5, 1.0),
+            vec4.fromValues( 0.5, -0.5,  0.5, 1.0),
+            vec4.fromValues(-0.5, -0.5, -0.5, 1.0),
+            vec4.fromValues(-0.5,  0.5, -0.5, 1.0),
+            vec4.fromValues( 0.5,  0.5, -0.5, 1.0),
+            vec4.fromValues( 0.5, -0.5, -0.5, 1.0)
+        ];
+
+        const vertexColors = [
+            vec4.fromValues(0.0, 0.0, 0.0, 1.0),  // black
+            vec4.fromValues(1.0, 0.0, 0.0, 1.0),  // red
+            vec4.fromValues(1.0, 1.0, 0.0, 1.0),  // yellow
+            vec4.fromValues(0.0, 1.0, 0.0, 1.0),  // green
+            vec4.fromValues(0.0, 0.0, 1.0, 1.0),  // blue
+            vec4.fromValues(1.0, 0.0, 1.0, 1.0),  // magenta
+            vec4.fromValues(0.0, 1.0, 1.0, 1.0),  // cyan
+            vec4.fromValues(1.0, 1.0, 1.0, 1.0)   // white
+        ];
+
+        function quad(a, b, c, d) {
+            pointsArray.push(vertices[a], vertices[b], vertices[c], vertices[a], vertices[c], vertices[d]);
+            colorsArray.push(vertexColors[a], vertexColors[a], vertexColors[a], vertexColors[a], vertexColors[a], vertexColors[a]);
+        }
+
+        function colorCube() {
+            quad(1, 0, 3, 2);
+            quad(2, 3, 7, 6);
+            quad(3, 0, 4, 7);
+            quad(6, 5, 1, 2);
+            quad(4, 5, 6, 7);
+            quad(5, 4, 0, 1);
+        }
+
+        // Initialize WebGL
+        window.onload = function init() {
+            const canvas = document.getElementById("gl-canvas");
+            gl = canvas.getContext("webgl");
+            if (!gl) { alert("WebGL isn't available"); }
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(1.0, 1.0, 1.0, 1.0);
+            gl.enable(gl.DEPTH_TEST);
+
+            // Compile shaders (boilerplate normally handled by initShaders.js)
+            const vShader = gl.createShader(gl.VERTEX_SHADER);
+            gl.shaderSource(vShader, document.getElementById("vertex-shader").text);
+            gl.compileShader(vShader);
+            
+            const fShader = gl.createShader(gl.FRAGMENT_SHADER);
+            gl.shaderSource(fShader, document.getElementById("fragment-shader").text);
+            gl.compileShader(fShader);
+            
+            const program = gl.createProgram();
+            gl.attachShader(program, vShader);
+            gl.attachShader(program, fShader);
+            gl.linkProgram(program);
+            gl.useProgram(program);
+
+            colorCube();
+
+            // Buffers
+            const cBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorsArray.map(v => Array.from(v)).flat()), gl.STATIC_DRAW);
+            const vColor = gl.getAttribLocation(program, "vColor");
+            gl.vertexAttribPointer(vColor, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(vColor);
+
+            const vBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pointsArray.map(v => Array.from(v)).flat()), gl.STATIC_DRAW);
+            const vPosition = gl.getAttribLocation(program, "vPosition");
+            gl.vertexAttribPointer(vPosition, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(vPosition);
+
+            modelViewMatrixLoc = gl.getUniformLocation(program, "modelViewMatrix");
+            projectionMatrixLoc = gl.getUniformLocation(program, "projectionMatrix");
+
+            // Event Listeners for interactive viewing
+            document.getElementById("Button1").onclick = function(){ theta += dr; };
+            document.getElementById("Button2").onclick = function(){ theta -= dr; };
+            document.getElementById("Button3").onclick = function(){ phi += dr; };
+            document.getElementById("Button4").onclick = function(){ phi -= dr; };
+
+            render();
+        }
+
+        function render() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            // 1. Calculate the 'eye' position using spherical coordinates
+            let eyeX = radius * Math.sin(theta) * Math.cos(phi);
+            let eyeY = radius * Math.sin(theta) * Math.sin(phi);
+            let eyeZ = radius * Math.cos(theta);
+            
+            let eye = vec3.fromValues(eyeX, eyeY, eyeZ);
+            let at = vec3.fromValues(0.0, 0.0, 0.0);
+            let up = vec3.fromValues(0.0, 1.0, 0.0);
+
+            // 2. Set View and Projection Matrices
+            mat4.lookAt(modelViewMatrix, eye, at, up);
+            mat4.perspective(projectionMatrix, fovy * Math.PI / 180, aspect, near, far);
+
+            // 3. Send matrices to shaders
+            gl.uniformMatrix4fv(modelViewMatrixLoc, false, modelViewMatrix);
+            gl.uniformMatrix4fv(projectionMatrixLoc, false, projectionMatrix);
+
+            gl.drawArrays(gl.TRIANGLES, 0, numVertices);
+            requestAnimationFrame(render);
+        }
+    </script>
+</body>
+</html>
