@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Recursive Subdivision Sphere</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 20px; }
+        canvas { border: 1px solid black; }
+        .controls { margin-top: 15px; }
+    </style>
+</head>
+<body>
+
+    <h2>Interactive Recursive Sphere Approximation</h2>
+    <canvas id="gl-canvas" width="512" height="512"></canvas>
+    
+    <div class="controls">
+        <label for="subdivisions">Subdivision Level: </label>
+        <input id="subdivisions" type="range" min="0" max="6" step="1" value="3" />
+        <span id="sub-val">3</span>
+    </div>
+
+    <script>
+        // --- WebGL Boilerplate & Shaders ---
+        const canvas = document.getElementById("gl-canvas");
+        const gl = canvas.getContext("webgl");
+
+        const vertexShaderSource = `
+            attribute vec4 vPosition;
+            void main() {
+                gl_Position = vPosition;
+            }
+        `;
+
+        const fragmentShaderSource = `
+            precision mediump float;
+            void main() {
+                gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); // Black wireframe
+            }
+        `;
+
+        function createShader(gl, type, source) {
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, source);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                gl.deleteShader(shader);
+                return null;
+            }
+            return shader;
+        }
+
+        const vertexShader = createShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        // --- Math Helper Functions ---
+        function mix(u, v, s) {
+            return [
+                u[0] * (1 - s) + v[0] * s,
+                u[1] * (1 - s) + v[1] * s,
+                u[2] * (1 - s) + v[2] * s,
+                1.0
+            ];
+        }
+
+        function normalize(v) {
+            let len = Math.sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+            if (len === 0) return [0, 0, 0, 1];
+            return [v[0]/len, v[1]/len, v[2]/len, 1.0];
+        }
+
+        // --- Sphere Generation Logic ---
+        let positions = [];
+        
+        // Initial Tetrahedron Vertices
+        const va = [0.0, 0.0, -1.0, 1];
+        const vb = [0.0, 0.942809, 0.333333, 1];
+        const vc = [-0.816497, -0.471405, 0.333333, 1];
+        const vd = [0.816497, -0.471405, 0.333333, 1];
+
+        // FIXED: The book had "positiions" and pushed 'a' three times.
+        function triangle(a, b, c) {
+            positions.push(...a);
+            positions.push(...b);
+            positions.push(...c);
+        }
+
+        function divideTriangle(a, b, c, count) {
+            if (count > 0) {
+                let ab = normalize(mix(a, b, 0.5));
+                let ac = normalize(mix(a, c, 0.5));
+                let bc = normalize(mix(b, c, 0.5));
+
+                divideTriangle(a, ab, ac, count - 1);
+                divideTriangle(ab, b, bc, count - 1);
+                divideTriangle(bc, c, ac, count - 1);
+                divideTriangle(ab, bc, ac, count - 1);
+            } else {
+                triangle(a, b, c);
+            }
+        }
+
+        function tetrahedron(a, b, c, d, n) {
+            positions = []; // Reset positions array
+            divideTriangle(a, b, c, n);
+            divideTriangle(d, c, b, n);
+            divideTriangle(a, d, b, n);
+            divideTriangle(a, c, d, n);
+        }
+
+        // --- Rendering Logic ---
+        const bufferId = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, bufferId);
+        
+        const vPosition = gl.getAttribLocation(program, "vPosition");
+        gl.vertexAttribPointer(vPosition, 4, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(vPosition);
+
+        function render(subdivisions) {
+            tetrahedron(va, vb, vc, vd, subdivisions);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+            gl.clearColor(0.9, 0.9, 0.9, 1.0); // Light gray background
+            gl.clear(gl.COLOR_BUFFER_BIT);
+
+            // Draw as a wireframe by looping through each triangle
+            const numTriangles = positions.length / 12; // 4 components per vertex, 3 vertices per triangle
+            for (let i = 0; i < numTriangles; i++) {
+                gl.drawArrays(gl.LINE_LOOP, i * 3, 3);
+            }
+        }
+
+        // --- Interaction Setup ---
+        const slider = document.getElementById("subdivisions");
+        const subValDisplay = document.getElementById("sub-val");
+
+        slider.addEventListener("input", function() {
+            const val = parseInt(this.value);
+            subValDisplay.textContent = val;
+            render(val);
+        });
+
+        // Initial render
+        render(parseInt(slider.value));
+
+    </script>
+</body>
+</html>
