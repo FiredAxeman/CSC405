@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Painter's Algorithm WebGL</title>
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #333; }
+        canvas { border: 2px solid white; background-color: black; }
+    </style>
+</head>
+<body>
+
+<canvas id="glcanvas" width="500" height="500"></canvas>
+
+<script>
+    function main() {
+        const canvas = document.getElementById("glcanvas");
+        const gl = canvas.getContext("webgl");
+
+        if (!gl) {
+            console.error("WebGL not supported by your browser.");
+            return;
+        }
+
+        // 1. SHADER SETUP
+        // Vertex Shader: Simply takes a 2D position. Z-depth is handled by our JS sorting, not the shader.
+        const vsSource = `
+            attribute vec2 a_position;
+            void main() {
+                gl_Position = vec4(a_position, 0.0, 1.0);
+            }
+        `;
+
+        // Fragment Shader: Applies a uniform solid color to the primitive
+        const fsSource = `
+            precision mediump float;
+            uniform vec4 u_color;
+            void main() {
+                gl_FragColor = u_color;
+            }
+        `;
+
+        // Compile shaders and link program
+        const shaderProgram = createProgram(gl, vsSource, fsSource);
+        gl.useProgram(shaderProgram);
+
+        // Get attribute and uniform locations
+        const positionLocation = gl.getAttribLocation(shaderProgram, "a_position");
+        const colorLocation = gl.getUniformLocation(shaderProgram, "u_color");
+
+        // 2. DEFINE PRIMITIVES (Triangles)
+        // We define three triangles with X/Y coordinates, a Color, and a simulated Z-depth.
+        // Higher Z means further away from the camera.
+        const triangles = [
+            { id: "Red",   color: [1.0, 0.0, 0.0, 1.0], z: 10.0, vertices: [ 0.0,  0.6,  -0.6, -0.4,   0.6, -0.4] }, // Furthest
+            { id: "Green", color: [0.0, 1.0, 0.0, 1.0], z: 5.0,  vertices: [-0.3,  0.8,  -0.8, -0.2,   0.2, -0.2] }, // Middle
+            { id: "Blue",  color: [0.0, 0.0, 1.0, 1.0], z: 1.0,  vertices: [ 0.3,  0.7,  -0.2, -0.3,   0.8, -0.3] }  // Closest
+        ];
+
+        // Intentionally scramble the order to prove the sorting algorithm works.
+        // If we just drew them in this order, Blue would be overwritten by Red!
+        let unsortedScene = [triangles[2], triangles[0], triangles[1]]; 
+
+        // 3. THE PAINTER'S ALGORITHM (Hidden-Surface Removal)
+        // Sort the array by depth (z). 
+        // We want the highest Z (furthest) to be drawn first, so we sort descending.
+        let sortedScene = unsortedScene.sort((a, b) => b.z - a.z);
+
+        console.log("Draw order determined by Painter's Algorithm:");
+        sortedScene.forEach(t => console.log(`Drawing ${t.id} (Z: ${t.z})`));
+
+        // 4. WEBGL RENDERING CONFIGURATION
+        // CRITICAL: Disable WebGL's automatic depth testing to force manual Painter's algorithm
+        gl.disable(gl.DEPTH_TEST); 
+        
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+        gl.clearColor(0.1, 0.1, 0.1, 1.0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+
+        // Create a buffer for our vertices
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+        // 5. DRAW LOOP
+        // Iterate through the sorted scene back-to-front
+        sortedScene.forEach(primitive => {
+            // Load the primitive's vertices into the buffer
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(primitive.vertices), gl.STATIC_DRAW);
+            
+            // Set the primitive's color
+            gl.uniform4fv(colorLocation, primitive.color);
+            
+            // Draw the triangle (3 vertices)
+            // As the loop progresses, closer triangles paint OVER the older ones in the color buffer.
+            gl.drawArrays(gl.TRIANGLES, 0, 3);
+        });
+    }
+
+    // Boilerplate function to compile shaders and link the program
+    function createProgram(gl, vsSource, fsSource) {
+        const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource);
+        const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource);
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            console.error("Program failed to link: " + gl.getProgramInfoLog(program));
+            return null;
+        }
+        return program;
+    }
+
+    // Boilerplate function to compile a specific shader
+    function loadShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            console.error("Shader compile error: " + gl.getShaderInfoLog(shader));
+            gl.deleteShader(shader);
+            return null;
+        }
+        return shader;
+    }
+
+    // Execute the program when the window loads
+    window.onload = main;
+</script>
+
+</body>
+</html>

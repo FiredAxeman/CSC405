@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Advanced WebGL Interactive Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gl-matrix/2.8.1/gl-matrix-min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background: #f4f4f9; }
+        canvas { border: 2px solid #333; box-shadow: 0px 4px 10px rgba(0,0,0,0.2); background: white; }
+        .controls { margin-top: 20px; display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; }
+        .control-group { background: #fff; padding: 10px 15px; border-radius: 8px; box-shadow: 0px 2px 5px rgba(0,0,0,0.1); }
+        button, select { padding: 8px 12px; margin: 5px; cursor: pointer; border: 1px solid #ccc; border-radius: 4px; background: #eef; }
+        button:hover, select:hover { background: #ddf; }
+        h2 { color: #333; }
+    </style>
+</head>
+<body>
+
+    <h2>Advanced WebGL Interactive Viewer</h2>
+    <canvas id="gl-canvas" width="600" height="400">
+        Oops ... your browser doesn't support the HTML5 canvas element
+    </canvas>
+
+    <div class="controls">
+        <div class="control-group">
+            <strong>Camera Angles:</strong><br>
+            <button id="BtnThetaInc">+ Theta (Left/Right)</button>
+            <button id="BtnThetaDec">- Theta</button>
+            <button id="BtnPhiInc">+ Phi (Up/Down)</button>
+            <button id="BtnPhiDec">- Phi</button>
+        </div>
+        
+        <div class="control-group">
+            <strong>Highlight Part:</strong><br>
+            <select id="partSelect">
+                <option value="none">None</option>
+                <option value="fuselage">Fuselage</option>
+                <option value="wings">Main Wings</option>
+                <option value="tail">Tail Section</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <strong>Visualization:</strong><br>
+            <select id="visSelect">
+                <option value="solid">Solid (Triangles)</option>
+                <option value="wireframe">Wireframe (Lines)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <strong>Active Shader:</strong><br>
+            <select id="shaderSelect">
+                <option value="color">Standard Colors</option>
+                <option value="grayscale">Grayscale Effect</option>
+            </select>
+        </div>
+    </div>
+
+    <script id="vertex-shader" type="x-shader/x-vertex">
+        attribute vec4 vPosition;
+        attribute vec4 vColor;
+        varying vec4 fColor;
+
+        uniform mat4 modelViewMatrix;
+        uniform mat4 projectionMatrix;
+        uniform bool uHighlight;
+
+        void main() {
+            gl_Position = projectionMatrix * modelViewMatrix * vPosition;
+            if (uHighlight) {
+                // Boost color for highlighting
+                fColor = vec4(vColor.rgb + 0.4, 1.0); 
+            } else {
+                fColor = vColor;
+            }
+        }
+    </script>
+
+    <script id="fragment-shader-color" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec4 fColor;
+
+        void main() {
+            gl_FragColor = fColor;
+        }
+    </script>
+
+    <script id="fragment-shader-gray" type="x-shader/x-fragment">
+        precision mediump float;
+        varying vec4 fColor;
+
+        void main() {
+            // Calculate luminance for a grayscale effect
+            float luminance = dot(fColor.rgb, vec3(0.299, 0.587, 0.114));
+            
+            // If highlighted, make it slightly bluish in grayscale mode
+            if (fColor.r > 1.0 || fColor.g > 1.0 || fColor.b > 1.0) {
+                 gl_FragColor = vec4(luminance, luminance + 0.3, luminance + 0.5, 1.0);
+            } else {
+                 gl_FragColor = vec4(luminance, luminance, luminance, 1.0);
+            }
+        }
+    </script>
+
+    <script>
+        let gl;
+        const numVertices  = 36;
+        let pointsArray = [];
+        let colorsArray = [];
+
+        // Camera parameters
+        let radius = 5.0;
+        let theta  = 0.5;
+        let phi    = 0.3;
+        const dr = 5.0 * Math.PI/180.0;
+
+        let fovy = 45.0;
+        let aspect = 1.5; 
+        let near = 0.1;
+        let far = 20.0;
+
+        let baseModelViewMatrix = mat4.create();
+        let projectionMatrix = mat4.create();
+        
+        let programs = {};
+        let currentProgram;
+
+        // Interactive State
+        let selectedPart = "none";
+        let renderMode = "solid";
+        let activeShader = "color";
+
+        const vertices = [
+            vec4.fromValues(-0.5, -0.5,  0.5, 1.0),
+            vec4.fromValues(-0.5,  0.5,  0.5, 1.0),
+            vec4.fromValues( 0.5,  0.5,  0.5, 1.0),
+            vec4.fromValues( 0.5, -0.5,  0.5, 1.0),
+            vec4.fromValues(-0.5, -0.5, -0.5, 1.0),
+            vec4.fromValues(-0.5,  0.5, -0.5, 1.0),
+            vec4.fromValues( 0.5,  0.5, -0.5, 1.0),
+            vec4.fromValues( 0.5, -0.5, -0.5, 1.0)
+        ];
+
+        const vertexColors = [
+            vec4.fromValues(0.2, 0.2, 0.2, 1.0),  // dark grey
+            vec4.fromValues(0.8, 0.1, 0.1, 1.0),  // red
+            vec4.fromValues(0.9, 0.9, 0.1, 1.0),  // yellow
+            vec4.fromValues(0.1, 0.8, 0.1, 1.0),  // green
+            vec4.fromValues(0.1, 0.1, 0.8, 1.0),  // blue
+            vec4.fromValues(0.8, 0.1, 0.8, 1.0),  // magenta
+            vec4.fromValues(0.1, 0.8, 0.8, 1.0),  // cyan
+            vec4.fromValues(0.9, 0.9, 0.9, 1.0)   // white
+        ];
+
+        function quad(a, b, c, d) {
+            pointsArray.push(vertices[a], vertices[b], vertices[c], vertices[a], vertices[c], vertices[d]);
+            colorsArray.push(vertexColors[a], vertexColors[a], vertexColors[a], vertexColors[a], vertexColors[a], vertexColors[a]);
+        }
+
+        function buildBaseCube() {
+            quad(1, 0, 3, 2);
+            quad(2, 3, 7, 6);
+            quad(3, 0, 4, 7);
+            quad(6, 5, 1, 2);
+            quad(4, 5, 6, 7);
+            quad(5, 4, 0, 1);
+        }
+
+        function compileShader(gl, type, id) {
+            const shaderScript = document.getElementById(id);
+            const shader = gl.createShader(type);
+            gl.shaderSource(shader, shaderScript.text);
+            gl.compileShader(shader);
+            if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+                console.error(gl.getShaderInfoLog(shader));
+                return null;
+            }
+            return shader;
+        }
+
+        function createProgram(gl, vShaderId, fShaderId) {
+            const vShader = compileShader(gl, gl.VERTEX_SHADER, vShaderId);
+            const fShader = compileShader(gl, gl.FRAGMENT_SHADER, fShaderId);
+            const prog = gl.createProgram();
+            gl.attachShader(prog, vShader);
+            gl.attachShader(prog, fShader);
+            gl.linkProgram(prog);
+            
+            prog.locs = {
+                vPosition: gl.getAttribLocation(prog, "vPosition"),
+                vColor: gl.getAttribLocation(prog, "vColor"),
+                modelViewMatrix: gl.getUniformLocation(prog, "modelViewMatrix"),
+                projectionMatrix: gl.getUniformLocation(prog, "projectionMatrix"),
+                uHighlight: gl.getUniformLocation(prog, "uHighlight")
+            };
+            return prog;
+        }
+
+        window.onload = function init() {
+            const canvas = document.getElementById("gl-canvas");
+            gl = canvas.getContext("webgl");
+            if (!gl) { alert("WebGL isn't available"); }
+
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            gl.clearColor(0.85, 0.9, 0.95, 1.0); // Light sky blue background
+            gl.enable(gl.DEPTH_TEST);
+
+            buildBaseCube();
+
+            // Create both shader programs
+            programs.color = createProgram(gl, "vertex-shader", "fragment-shader-color");
+            programs.grayscale = createProgram(gl, "vertex-shader", "fragment-shader-gray");
+
+            // Setup buffers
+            const cBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, cBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(colorsArray.map(v => Array.from(v)).flat()), gl.STATIC_DRAW);
+            gl.cBuffer = cBuffer;
+
+            const vBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, vBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pointsArray.map(v => Array.from(v)).flat()), gl.STATIC_DRAW);
+            gl.vBuffer = vBuffer;
+
+            // UI Listeners
+            document.getElementById("BtnThetaInc").onclick = () => theta += dr;
+            document.getElementById("BtnThetaDec").onclick = () => theta -= dr;
+            document.getElementById("BtnPhiInc").onclick = () => phi += dr;
+            document.getElementById("BtnPhiDec").onclick = () => phi -= dr;
+            
+            document.getElementById("partSelect").onchange = (e) => selectedPart = e.target.value;
+            document.getElementById("visSelect").onchange = (e) => renderMode = e.target.value;
+            document.getElementById("shaderSelect").onchange = (e) => activeShader = e.target.value;
+
+            render();
+        }
+
+        function drawPart(prog, transformMat, partName) {
+            let finalMat = mat4.create();
+            mat4.multiply(finalMat, baseModelViewMatrix, transformMat);
+            gl.uniformMatrix4fv(prog.locs.modelViewMatrix, false, finalMat);
+            
+            // Pass highlight boolean
+            gl.uniform1i(prog.locs.uHighlight, selectedPart === partName ? 1 : 0);
+
+            let primitive = renderMode === "wireframe" ? gl.LINE_LOOP : gl.TRIANGLES;
+            gl.drawArrays(primitive, 0, numVertices);
+        }
+
+        function render() {
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            currentProgram = programs[activeShader];
+            gl.useProgram(currentProgram);
+
+            // Bind attributes for current program
+            gl.bindBuffer(gl.ARRAY_BUFFER, gl.cBuffer);
+            gl.vertexAttribPointer(currentProgram.locs.vColor, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(currentProgram.locs.vColor);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, gl.vBuffer);
+            gl.vertexAttribPointer(currentProgram.locs.vPosition, 4, gl.FLOAT, false, 0, 0);
+            gl.enableVertexAttribArray(currentProgram.locs.vPosition);
+
+            // Camera Setup
+            let eyeX = radius * Math.sin(theta) * Math.cos(phi);
+            let eyeY = radius * Math.sin(phi);
+            let eyeZ = radius * Math.cos(theta) * Math.cos(phi);
+            
+            mat4.lookAt(baseModelViewMatrix, vec3.fromValues(eyeX, eyeY, eyeZ), vec3.fromValues(0, 0, 0), vec3.fromValues(0, 1, 0));
+            mat4.perspective(projectionMatrix, fovy * Math.PI / 180, aspect, near, far);
+            gl.uniformMatrix4fv(currentProgram.locs.projectionMatrix, false, projectionMatrix);
+
+            // Build Complex Object (Stylized Aircraft)
+            
+            // 1. Fuselage
+            let matFuselage = mat4.create();
+            mat4.scale(matFuselage, matFuselage, vec3.fromValues(0.3, 0.3, 2.0));
+            drawPart(currentProgram, matFuselage, "fuselage");
+
+            // 2. Main Wings
+            let matWings = mat4.create();
+            mat4.translate(matWings, matWings, vec3.fromValues(0.0, 0.0, 0.2));
+            mat4.scale(matWings, matWings, vec3.fromValues(2.0, 0.05, 0.4));
+            drawPart(currentProgram, matWings, "wings");
+
+            // 3. Horizontal Tail
+            let matTailH = mat4.create();
+            mat4.translate(matTailH, matTailH, vec3.fromValues(0.0, 0.1, -0.8));
+            mat4.scale(matTailH, matTailH, vec3.fromValues(0.8, 0.05, 0.3));
+            drawPart(currentProgram, matTailH, "tail");
+
+            // 4. Vertical Stabilizer (grouped with tail for highlighting)
+            let matTailV = mat4.create();
+            mat4.translate(matTailV, matTailV, vec3.fromValues(0.0, 0.35, -0.85));
+            mat4.scale(matTailV, matTailV, vec3.fromValues(0.05, 0.6, 0.2));
+            drawPart(currentProgram, matTailV, "tail");
+
+            requestAnimationFrame(render);
+        }
+    </script>
+</body>
+</html>
